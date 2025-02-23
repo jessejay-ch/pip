@@ -1,5 +1,5 @@
-import collections
 import math
+from functools import lru_cache
 from typing import (
     TYPE_CHECKING,
     Dict,
@@ -99,12 +99,11 @@ class PipProvider(_ProviderBase):
         self._ignore_dependencies = ignore_dependencies
         self._upgrade_strategy = upgrade_strategy
         self._user_requested = user_requested
-        self._known_depths: Dict[str, float] = collections.defaultdict(lambda: math.inf)
 
     def identify(self, requirement_or_candidate: Union[Requirement, Candidate]) -> str:
         return requirement_or_candidate.name
 
-    def get_preference(  # type: ignore
+    def get_preference(
         self,
         identifier: str,
         resolutions: Mapping[str, Candidate],
@@ -123,15 +122,26 @@ class PipProvider(_ProviderBase):
           explicit URL.
         * If equal, prefer if any requirement is "pinned", i.e. contains
           operator ``===`` or ``==``.
-        * If equal, calculate an approximate "depth" and resolve requirements
-          closer to the user-specified requirements first.
         * Order user-specified requirements by the order they are specified.
         * If equal, prefers "non-free" requirements, i.e. contains at least one
           operator, such as ``>=`` or ``<``.
         * If equal, order alphabetically for consistency (helps debuggability).
         """
-        lookups = (r.get_candidate_lookup() for r, _ in information[identifier])
-        candidate, ireqs = zip(*lookups)
+        try:
+            next(iter(information[identifier]))
+        except StopIteration:
+            # There is no information for this identifier, so there's no known
+            # candidates.
+            has_information = False
+        else:
+            has_information = True
+
+        if has_information:
+            lookups = (r.get_candidate_lookup() for r, _ in information[identifier])
+            candidate, ireqs = zip(*lookups)
+        else:
+            candidate, ireqs = None, ()
+
         operators = [
             specifier.operator
             for specifier_set in (ireq.specifier for ireq in ireqs if ireq)
@@ -141,35 +151,11 @@ class PipProvider(_ProviderBase):
         direct = candidate is not None
         pinned = any(op[:2] == "==" for op in operators)
         unfree = bool(operators)
-
-        try:
-            requested_order: Union[int, float] = self._user_requested[identifier]
-        except KeyError:
-            requested_order = math.inf
-            parent_depths = (
-                self._known_depths[parent.name] if parent is not None else 0.0
-                for _, parent in information[identifier]
-            )
-            inferred_depth = min(d for d in parent_depths) + 1.0
-        else:
-            inferred_depth = 1.0
-        self._known_depths[identifier] = inferred_depth
-
         requested_order = self._user_requested.get(identifier, math.inf)
 
         # Requires-Python has only one candidate and the check is basically
         # free, so we always do it first to avoid needless work if it fails.
         requires_python = identifier == REQUIRES_PYTHON_IDENTIFIER
-
-        # HACK: Setuptools have a very long and solid backward compatibility
-        # track record, and extremely few projects would request a narrow,
-        # non-recent version range of it since that would break a lot things.
-        # (Most projects specify it only to request for an installer feature,
-        # which does not work, but that's another topic.) Intentionally
-        # delaying Setuptools helps reduce branches the resolver has to check.
-        # This serves as a temporary fix for issues like "apache-airflow[all]"
-        # while we work on "proper" branch pruning techniques.
-        delay_this = identifier == "setuptools"
 
         # Prefer the causes of backtracking on the assumption that the problem
         # resolving the dependency tree is related to the failures that caused
@@ -178,11 +164,9 @@ class PipProvider(_ProviderBase):
 
         return (
             not requires_python,
-            delay_this,
             not direct,
             not pinned,
             not backtrack_cause,
-            inferred_depth,
             requested_order,
             not unfree,
             identifier,
@@ -227,8 +211,10 @@ class PipProvider(_ProviderBase):
             constraint=constraint,
             prefers_installed=(not _eligible_for_upgrade(identifier)),
             incompatibilities=incompatibilities,
+            is_satisfied_by=self.is_satisfied_by,
         )
 
+    @lru_cache(maxsize=None)
     def is_satisfied_by(self, requirement: Requirement, candidate: Candidate) -> bool:
         return requirement.is_satisfied_by(candidate)
 

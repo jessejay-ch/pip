@@ -17,7 +17,6 @@ extensions = [
     # first-party extensions
     "sphinx.ext.autodoc",
     "sphinx.ext.todo",
-    "sphinx.ext.extlinks",
     "sphinx.ext.intersphinx",
     # our extensions
     "pip_sphinxext",
@@ -26,6 +25,7 @@ extensions = [
     "sphinx_copybutton",
     "sphinx_inline_tabs",
     "sphinxcontrib.towncrier",
+    "sphinx_issues",
 ]
 
 # General information about the project.
@@ -69,14 +69,6 @@ smartquotes_action = "qe"
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "pypug": ("https://packaging.python.org", None),
-}
-
-# -- Options for extlinks -------------------------------------------------------------
-
-extlinks = {
-    "issue": ("https://github.com/pypa/pip/issues/%s", "#"),
-    "pull": ("https://github.com/pypa/pip/pull/%s", "PR #"),
-    "pypi": ("https://pypi.org/project/%s/", ""),
 }
 
 # -- Options for towncrier_draft extension --------------------------------------------
@@ -131,3 +123,13 @@ def determine_man_pages() -> List[Tuple[str, str, str, str, int]]:
 
 
 man_pages = determine_man_pages()
+
+# -- Options for sphinx_copybutton ----------------------------------------------------
+
+copybutton_prompt_text = r"\$ | C\:\> "
+copybutton_prompt_is_regexp = True
+copybutton_only_copy_prompt_lines = False
+
+# -- Options for sphinx_issues --------------------------------------------------------
+
+issues_default_group_project = "pypa/pip"
